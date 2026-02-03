@@ -15,6 +15,8 @@ DATA_CSV_PATH = os.getenv("DATA_CSV_PATH", "../database-mysql/seed/sample_data.c
 
 st.set_page_config(page_title="Semiconductor Sustainability Analytics", layout="wide")
 
+PLOTLY_TEMPLATE = "plotly_dark"
+
 
 def fetch_json(path: str, params=None):
     try:
@@ -109,7 +111,10 @@ tabs = st.tabs(
 )
 
 with tabs[0]:
-    facility_options = ["All Facilities"] + sorted(df["facility_name"].unique().tolist())
+    admin_facilities = fetch_json("/admin/facilities") or []
+    admin_names = [f.get("facility_name") for f in admin_facilities if f.get("facility_name")]
+    data_names = df["facility_name"].dropna().unique().tolist()
+    facility_options = ["All Facilities"] + sorted(set(admin_names + data_names))
     selected_facility = st.sidebar.selectbox("Facility", facility_options)
 
     min_date = df["timestamp"].min().date()
@@ -189,6 +194,45 @@ with tabs[0]:
 
     st.plotly_chart(score_fig, use_container_width=True)
 
+    alerts = fetch_json(
+        "/alerts",
+        params={
+            "facility_id": facility_id_param,
+            "start": str(start_date),
+            "end": str(end_date),
+            "energy_threshold": energy_threshold,
+            "water_threshold": water_threshold,
+            "waste_threshold": waste_threshold,
+        },
+    )
+
+    alert_df = pd.DataFrame(alerts or [])
+    if not alert_df.empty:
+        if selected_facility == "All Facilities":
+            alert_df = alert_df.merge(
+                df[["facility_id", "facility_name"]].drop_duplicates(),
+                on="facility_id",
+                how="left",
+            )
+        else:
+            alert_df["facility_name"] = selected_facility
+
+    def _add_alert_markers(fig, metric_key, label):
+        if alert_df.empty:
+            return
+        metric_alerts = alert_df[alert_df["metric"] == metric_key]
+        if metric_alerts.empty:
+            return
+        fig.add_trace(
+            go.Scatter(
+                x=pd.to_datetime(metric_alerts["timestamp"]),
+                y=metric_alerts["value"],
+                mode="markers",
+                name=f"{label} Alerts",
+                marker=dict(size=10, color="#ff6b6b", symbol="x"),
+            )
+        )
+
     st.subheader("Trends")
     trend_cols = st.columns(2)
 
@@ -200,7 +244,26 @@ with tabs[0]:
             color="facility_name" if selected_facility == "All Facilities" else None,
             title="Energy (kWh per Wafer)",
             markers=True,
+            template=PLOTLY_TEMPLATE,
         )
+        fig_energy.update_layout(
+            hovermode="x unified",
+            xaxis=dict(
+                rangeselector=dict(
+                    buttons=list(
+                        [
+                            dict(count=1, label="1M", step="month", stepmode="backward"),
+                            dict(count=3, label="3M", step="month", stepmode="backward"),
+                            dict(count=6, label="6M", step="month", stepmode="backward"),
+                            dict(step="all", label="All"),
+                        ]
+                    )
+                ),
+                rangeslider=dict(visible=True),
+                type="date",
+            ),
+        )
+        _add_alert_markers(fig_energy, "energy_kwh_per_wafer", "Energy")
         st.plotly_chart(fig_energy, use_container_width=True)
 
     with trend_cols[1]:
@@ -211,7 +274,26 @@ with tabs[0]:
             color="facility_name" if selected_facility == "All Facilities" else None,
             title="Water per Wafer (L)",
             markers=True,
+            template=PLOTLY_TEMPLATE,
         )
+        fig_water.update_layout(
+            hovermode="x unified",
+            xaxis=dict(
+                rangeselector=dict(
+                    buttons=list(
+                        [
+                            dict(count=1, label="1M", step="month", stepmode="backward"),
+                            dict(count=3, label="3M", step="month", stepmode="backward"),
+                            dict(count=6, label="6M", step="month", stepmode="backward"),
+                            dict(step="all", label="All"),
+                        ]
+                    )
+                ),
+                rangeslider=dict(visible=True),
+                type="date",
+            ),
+        )
+        _add_alert_markers(fig_water, "water_per_wafer_l", "Water")
         st.plotly_chart(fig_water, use_container_width=True)
 
     trend_cols_2 = st.columns(2)
@@ -223,7 +305,26 @@ with tabs[0]:
             color="facility_name" if selected_facility == "All Facilities" else None,
             title="Scope 2 Emissions (tCO2e)",
             markers=True,
+            template=PLOTLY_TEMPLATE,
         )
+        fig_carbon.update_layout(
+            hovermode="x unified",
+            xaxis=dict(
+                rangeselector=dict(
+                    buttons=list(
+                        [
+                            dict(count=1, label="1M", step="month", stepmode="backward"),
+                            dict(count=3, label="3M", step="month", stepmode="backward"),
+                            dict(count=6, label="6M", step="month", stepmode="backward"),
+                            dict(step="all", label="All"),
+                        ]
+                    )
+                ),
+                rangeslider=dict(visible=True),
+                type="date",
+            ),
+        )
+        _add_alert_markers(fig_carbon, "scope2_tco2e", "Scope 2")
         st.plotly_chart(fig_carbon, use_container_width=True)
 
     with trend_cols_2[1]:
@@ -234,7 +335,26 @@ with tabs[0]:
             color="facility_name" if selected_facility == "All Facilities" else None,
             title="Cleanroom Particle Count",
             markers=True,
+            template=PLOTLY_TEMPLATE,
         )
+        fig_clean.update_layout(
+            hovermode="x unified",
+            xaxis=dict(
+                rangeselector=dict(
+                    buttons=list(
+                        [
+                            dict(count=1, label="1M", step="month", stepmode="backward"),
+                            dict(count=3, label="3M", step="month", stepmode="backward"),
+                            dict(count=6, label="6M", step="month", stepmode="backward"),
+                            dict(step="all", label="All"),
+                        ]
+                    )
+                ),
+                rangeslider=dict(visible=True),
+                type="date",
+            ),
+        )
+        _add_alert_markers(fig_clean, "particle_count", "Particle")
         st.plotly_chart(fig_clean, use_container_width=True)
 
     st.subheader("Forecast")
@@ -274,20 +394,7 @@ with tabs[0]:
         st.info("Forecast unavailable. Start the API for forecasting.")
 
     st.subheader("Alerts")
-    alerts = fetch_json(
-        "/alerts",
-        params={
-            "facility_id": facility_id_param,
-            "start": str(start_date),
-            "end": str(end_date),
-            "energy_threshold": energy_threshold,
-            "water_threshold": water_threshold,
-            "waste_threshold": waste_threshold,
-        },
-    )
-
-    if alerts:
-        alert_df = pd.DataFrame(alerts)
+    if not alert_df.empty:
         st.dataframe(alert_df, use_container_width=True)
     else:
         st.success("No alerts triggered for the selected period.")

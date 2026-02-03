@@ -1,0 +1,10 @@
+.env
+.venv
+__pycache__/
+*.pyc
+.streamlit/
+.idea/
+.vscode/
+*.db
+*.log
+node_modules/

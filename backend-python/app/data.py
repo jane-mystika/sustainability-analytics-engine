@@ -69,7 +69,7 @@ def filter_dataset(
     start: Optional[str] = None,
     end: Optional[str] = None,
 ) -> pd.DataFrame:
-    df = get_dataset().copy()
+    df = get_dataset()
 
     if facility_id:
         df = df[df["facility_id"] == facility_id]
@@ -80,4 +80,4 @@ def filter_dataset(
     if end:
         df = df[df["timestamp"] <= pd.to_datetime(end).date()]
 
-    return df
+    return df.copy()

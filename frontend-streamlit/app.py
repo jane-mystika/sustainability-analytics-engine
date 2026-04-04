@@ -48,6 +48,16 @@ def patch_json(path: str, payload: dict):
         return None
 
 
+def delete_json(path: str):
+    try:
+        headers = _auth_headers()
+        resp = requests.delete(f"{API_URL}{path}", headers=headers, timeout=5)
+        resp.raise_for_status()
+        return resp.json()
+    except Exception:
+        return None
+
+
 def _auth_headers():
     token = st.session_state.get("auth_token")
     if token:
@@ -104,9 +114,9 @@ tabs = st.tabs(
         "Dashboard",
         "Users & Roles",
         "Facilities",
-        "Assignments",
+        "Assignments (Auto)",
         "Alerts Resolution",
-        "Notifications",
+        "Notifications (Auto)",
     ]
 )
 
@@ -193,6 +203,40 @@ with tabs[0]:
     )
 
     st.plotly_chart(score_fig, use_container_width=True)
+
+    with st.expander("How the Sustainability Rating is calculated (formula)"):
+        st.markdown("**Step 1: Normalize each metric to a 0-100 score**")
+        st.latex(r"\text{Inverse metric score} = 100 \times \frac{high - value}{high - low}")
+        st.latex(r"\text{Direct metric score} = 100 \times \frac{value - low}{high - low}")
+        st.caption("Values are clipped between low and high before scoring.")
+
+        st.markdown("**Step 2: Compute 5 component scores (simple averages)**")
+        st.markdown(
+            "- **Energy**: energy/wafer, cleanroom energy, utilization, peak energy %, renewable %\n"
+            "- **Water**: UPW consumption, water recycling, wastewater treatment, water/wafer\n"
+            "- **Waste**: hazardous waste, chemical recycling, solvent recovery, compliance\n"
+            "- **Carbon**: scope1, scope2, scope3 emissions\n"
+            "- **Cleanroom**: filtration efficiency, particle count, HVAC energy, cleanroom class"
+        )
+
+        st.markdown("**Step 3: Overall Sustainability Score**")
+        st.latex(
+            r"\text{Overall Score} = \frac{\text{Energy} + \text{Water} + \text{Waste} + \text{Carbon} + \text{Cleanroom}}{5}"
+        )
+        st.caption("All 5 components are equally weighted (20% each).")
+
+        st.markdown("**Tier Mapping**")
+        st.markdown("- Platinum: >= 85\n- Gold: 75-84.99\n- Silver: 60-74.99\n- Bronze: < 60")
+
+        component_values = score_data.get("components", {})
+        if component_values:
+            formula_df = pd.DataFrame(
+                [
+                    {"Component": k.capitalize(), "Score": round(v, 2)}
+                    for k, v in component_values.items()
+                ]
+            )
+            st.dataframe(formula_df, use_container_width=True, hide_index=True)
 
     alerts = fetch_json(
         "/alerts",
@@ -428,8 +472,54 @@ with tabs[1]:
                 )
                 if created:
                     st.success("User created.")
+                    st.rerun()
                 else:
                     st.error("Failed to create user.")
+        with st.expander("Update user"):
+            with st.form("update_user"):
+                target_user_id = st.text_input("Target User ID")
+                col_a, col_b = st.columns(2)
+                name = col_a.text_input("New Name (optional)")
+                role = col_b.selectbox(
+                    "New Role (optional)",
+                    ["", "Employer", "Support Staff", "Manager/Admin"],
+                )
+                email = st.text_input("New Email (optional)")
+                password = st.text_input("New Password (optional)", type="password")
+                submitted = st.form_submit_button("Update User")
+                if submitted:
+                    payload = {}
+                    if name:
+                        payload["name"] = name
+                    if role:
+                        payload["role"] = role
+                    if email:
+                        payload["email"] = email
+                    if password:
+                        payload["password"] = password
+                    if not target_user_id or not payload:
+                        st.error("Provide user ID and at least one field.")
+                    else:
+                        updated = patch_json(f"/admin/users/{target_user_id}", payload)
+                        if updated:
+                            st.success("User updated.")
+                            st.rerun()
+                        else:
+                            st.error("Failed to update user.")
+        with st.expander("Delete user"):
+            with st.form("delete_user"):
+                target_user_id = st.text_input("User ID to Delete")
+                submitted = st.form_submit_button("Delete User")
+                if submitted:
+                    if not target_user_id:
+                        st.error("Enter user ID.")
+                    else:
+                        deleted = delete_json(f"/admin/users/{target_user_id}")
+                        if deleted:
+                            st.success("User deleted.")
+                            st.rerun()
+                        else:
+                            st.error("Failed to delete user.")
 
 with tabs[2]:
     st.subheader("Facilities")
@@ -455,56 +545,84 @@ with tabs[2]:
                 )
                 if created:
                     st.success("Facility added.")
+                    st.rerun()
                 else:
                     st.error("Failed to add facility.")
+        with st.expander("Update facility"):
+            with st.form("update_facility"):
+                target_facility_id = st.text_input("Target Facility ID")
+                col_a, col_b = st.columns(2)
+                facility_name = col_a.text_input("New Facility Name (optional)")
+                region = col_b.text_input("New Region (optional)")
+                submitted = st.form_submit_button("Update Facility")
+                if submitted:
+                    payload = {}
+                    if facility_name:
+                        payload["facility_name"] = facility_name
+                    if region:
+                        payload["region"] = region
+                    if not target_facility_id or not payload:
+                        st.error("Provide facility ID and at least one field.")
+                    else:
+                        updated = patch_json(f"/admin/facilities/{target_facility_id}", payload)
+                        if updated:
+                            st.success("Facility updated.")
+                            st.rerun()
+                        else:
+                            st.error("Failed to update facility.")
+        with st.expander("Delete facility"):
+            with st.form("delete_facility"):
+                target_facility_id = st.text_input("Facility ID to Delete")
+                submitted = st.form_submit_button("Delete Facility")
+                if submitted:
+                    if not target_facility_id:
+                        st.error("Enter facility ID.")
+                    else:
+                        deleted = delete_json(f"/admin/facilities/{target_facility_id}")
+                        if deleted:
+                            st.success("Facility deleted.")
+                            st.rerun()
+                        else:
+                            st.error("Failed to delete facility.")
 
 with tabs[3]:
     st.subheader("Assignments")
     if st.session_state.get("auth_role") != "Manager/Admin":
         st.warning("Admin access required.")
     else:
+        st.caption(
+            "Assignments are primarily managed automatically by the alert workflow. "
+            "This tab is read-only."
+        )
         assignments = fetch_json("/admin/assignments") or []
         st.dataframe(pd.DataFrame(assignments), use_container_width=True)
-        with st.form("create_assignment"):
-            col_a, col_b = st.columns(2)
-            assignment_id = col_a.text_input("Assignment ID")
-            user_id = col_b.text_input("User ID")
-            col_c, col_d = st.columns(2)
-            facility_id = col_c.text_input("Facility ID")
-            metric_owner = col_d.text_input("Metric Owner (optional)")
-            escalation_contact = st.text_input("Escalation Contact (optional)")
-            submitted = st.form_submit_button("Create Assignment")
-            if submitted:
-                created = post_json(
-                    "/admin/assignments",
-                    {
-                        "assignment_id": assignment_id,
-                        "user_id": user_id,
-                        "facility_id": facility_id,
-                        "metric_owner": metric_owner or None,
-                        "escalation_contact": escalation_contact or None,
-                    },
-                )
-                if created:
-                    st.success("Assignment created.")
-                else:
-                    st.error("Failed to create assignment.")
+        st.info(
+            "Manual assignment creation is disabled. New alerts are assigned automatically to support staff."
+        )
 
 with tabs[4]:
     st.subheader("Alerts Resolution")
     if st.session_state.get("auth_role") != "Manager/Admin":
         st.warning("Admin access required.")
     else:
+        st.caption(
+            "When an alert is created, the backend automatically assigns it to support staff, "
+            "records history, and triggers admin notifications when escalation is needed."
+        )
         alert_items = fetch_json("/admin/alerts") or []
         st.dataframe(pd.DataFrame(alert_items), use_container_width=True)
         with st.form("create_alert"):
             col_a, col_b = st.columns(2)
-            alert_id = col_a.text_input("Alert ID")
+            auto_alert_id = f"alert-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+            alert_id = col_a.text_input("Alert ID", value=auto_alert_id)
             facility_id = col_b.text_input("Facility ID")
             col_c, col_d = st.columns(2)
             metric = col_c.text_input("Metric")
             value = col_d.number_input("Value", value=0.0, format="%.2f")
-            status = st.selectbox("Status", ["open", "in_progress", "resolved"])
+            status = st.selectbox(
+                "Status",
+                ["open", "in_progress", "resolved", "needs_info", "unresolved", "escalated"],
+            )
             submitted = st.form_submit_button("Create Alert")
             if submitted:
                 created = post_json(
@@ -521,13 +639,17 @@ with tabs[4]:
                 )
                 if created:
                     st.success("Alert created.")
+                    st.rerun()
                 else:
                     st.error("Failed to create alert.")
 
         with st.form("resolve_alert"):
             col_a, col_b = st.columns(2)
             resolve_id = col_a.text_input("Alert ID to Update")
-            status = col_b.selectbox("New Status", ["open", "in_progress", "resolved"])
+            status = col_b.selectbox(
+                "New Status",
+                ["open", "in_progress", "resolved", "needs_info", "unresolved", "escalated"],
+            )
             resolution_note = st.text_input("Resolution Note (optional)")
             resolved_by = st.text_input("Resolved By (optional)")
             submitted = st.form_submit_button("Update Alert")
@@ -542,34 +664,24 @@ with tabs[4]:
                 )
                 if updated:
                     st.success("Alert updated.")
+                    st.rerun()
                 else:
                     st.error("Failed to update alert.")
+
+        st.markdown("#### Alert History")
+        history = fetch_json("/admin/alerts/history") or []
+        st.dataframe(pd.DataFrame(history), use_container_width=True)
 
 with tabs[5]:
     st.subheader("Notifications")
     if st.session_state.get("auth_role") != "Manager/Admin":
         st.warning("Admin access required.")
     else:
+        st.caption(
+            "Notifications are generated automatically by alert assignment and escalation workflow."
+        )
         notifications = fetch_json("/admin/notifications") or []
         st.dataframe(pd.DataFrame(notifications), use_container_width=True)
-        with st.form("create_notification"):
-            col_a, col_b = st.columns(2)
-            notification_id = col_a.text_input("Notification ID")
-            channel = col_b.selectbox("Channel", ["email", "sms", "app"])
-            recipient = st.text_input("Recipient")
-            message = st.text_area("Message")
-            submitted = st.form_submit_button("Queue Notification")
-            if submitted:
-                created = post_json(
-                    "/admin/notifications",
-                    {
-                        "notification_id": notification_id,
-                        "channel": channel,
-                        "recipient": recipient,
-                        "message": message,
-                    },
-                )
-                if created:
-                    st.success("Notification queued.")
-                else:
-                    st.error("Failed to queue notification.")
+        st.info(
+            "Manual notification queueing is disabled. Notifications are generated by automated alert workflow."
+        )

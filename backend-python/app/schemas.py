@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from typing import List, Optional
 
 from pydantic import BaseModel
@@ -15,6 +15,11 @@ class FacilityCreate(BaseModel):
     region: str | None = None
 
 
+class FacilityUpdate(BaseModel):
+    facility_name: str | None = None
+    region: str | None = None
+
+
 class User(BaseModel):
     user_id: str
     name: str
@@ -26,6 +31,13 @@ class UserCreate(BaseModel):
     user_id: str
     name: str
     role: str
+    email: str | None = None
+    password: str | None = None
+
+
+class UserUpdate(BaseModel):
+    name: str | None = None
+    role: str | None = None
     email: str | None = None
     password: str | None = None
 
@@ -52,6 +64,21 @@ class AlertResolution(BaseModel):
     metric: str
     value: float
     status: str
+    assigned_to: str | None = None
+    assignment_id: str | None = None
+    escalation_contact: str | None = None
+    resolution_note: str | None = None
+    resolved_by: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class AlertCreate(BaseModel):
+    alert_id: str
+    facility_id: str
+    metric: str
+    value: float
+    status: str = "open"
     resolution_note: str | None = None
     resolved_by: str | None = None
 
@@ -60,6 +87,18 @@ class AlertResolutionUpdate(BaseModel):
     status: str
     resolution_note: str | None = None
     resolved_by: str | None = None
+
+
+class AlertHistoryEvent(BaseModel):
+    event_id: str
+    alert_id: str
+    event_type: str
+    previous_status: str | None = None
+    new_status: str | None = None
+    actor_user_id: str | None = None
+    actor_role: str | None = None
+    note: str | None = None
+    created_at: datetime
 
 
 class Notification(BaseModel):

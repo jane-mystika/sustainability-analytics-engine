@@ -1,12 +1,20 @@
 # Sustainability Analytics Dashboard
 
-Streamlit dashboard for semiconductor manufacturing sustainability metrics.
+Streamlit frontend for sustainability scoring, alerts, forecasting, and admin operations.
 
-## Run (local)
-1. Create a virtual environment and install dependencies:
-   - `python -m venv .venv`
-   - `.venv\\Scripts\\activate`
-   - `pip install -r requirements.txt`
-2. Copy `.env.example` to `.env` and adjust as needed.
-3. Start Streamlit:
-   - `streamlit run app.py`
+## Local run
+1. `python -m venv .venv`
+2. `.venv\Scripts\activate`
+3. `pip install -r requirements.txt`
+4. Copy `.env.example` to `.env`
+5. `streamlit run app.py`
+
+## Important environment variables
+- `APP_TITLE`: dashboard title shown in the UI
+- `ENVIRONMENT`: `development` or `production`
+- `API_URL`: backend base URL
+- `DATA_CSV_PATH`: local fallback dataset path
+- `REQUEST_TIMEOUT`: API request timeout in seconds
+
+## Deployment note
+In the production compose stack, this app talks to the backend over the internal Docker network while Caddy serves the public domain and HTTPS.

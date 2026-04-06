@@ -12,10 +12,17 @@ load_dotenv()
 
 API_URL = os.getenv("API_URL", "http://localhost:8000")
 DATA_CSV_PATH = os.getenv("DATA_CSV_PATH", "../database-mysql/seed/sample_data.csv")
+DEMO_ADMIN_USER = os.getenv("ADMIN_USER_ID", "admin")
+DEMO_ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "ChangeMe123!")
 
 st.set_page_config(page_title="Semiconductor Sustainability Analytics", layout="wide")
 
-PLOTLY_TEMPLATE = "plotly_dark"
+PLOTLY_TEMPLATE = "plotly_white"
+
+CHART_LINE_COLORS = ["#5B8FF9", "#61CDBB", "#F6BD16", "#E8684A", "#9270CA"]
+CHART_GRID_COLOR = "rgba(44, 62, 80, 0.10)"
+CHART_PAPER_BG = "#F9FBFC"
+CHART_PLOT_BG = "#FFFFFF"
 
 
 def fetch_json(path: str, params=None):
@@ -65,6 +72,64 @@ def _auth_headers():
     return {}
 
 
+def style_time_series_chart(fig, title: str):
+    # Keep every trend chart visually consistent with a light dashboard theme.
+    fig.update_layout(
+        template=PLOTLY_TEMPLATE,
+        title=dict(text=title, font=dict(size=18, color="#243447")),
+        hovermode="x unified",
+        paper_bgcolor=CHART_PAPER_BG,
+        plot_bgcolor=CHART_PLOT_BG,
+        margin=dict(l=20, r=20, t=60, b=20),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+            bgcolor="rgba(255,255,255,0.65)",
+        ),
+        colorway=CHART_LINE_COLORS,
+    )
+    fig.update_xaxes(
+        showgrid=True,
+        gridcolor=CHART_GRID_COLOR,
+        linecolor="rgba(44, 62, 80, 0.18)",
+        tickfont=dict(color="#51606F"),
+        rangeselector=dict(
+            bgcolor="rgba(255,255,255,0.95)",
+            activecolor="#DCE8FF",
+            buttons=list(
+                [
+                    dict(count=1, label="1M", step="month", stepmode="backward"),
+                    dict(count=3, label="3M", step="month", stepmode="backward"),
+                    dict(count=6, label="6M", step="month", stepmode="backward"),
+                    dict(step="all", label="All"),
+                ]
+            ),
+        ),
+        rangeslider=dict(visible=True, bgcolor="rgba(91,143,249,0.08)", borderwidth=0),
+        type="date",
+    )
+    fig.update_yaxes(
+        showgrid=True,
+        gridcolor=CHART_GRID_COLOR,
+        zeroline=False,
+        tickfont=dict(color="#51606F"),
+    )
+    fig.update_traces(
+        line=dict(width=2),
+        marker=dict(size=5, line=dict(width=0)),
+        selector=dict(type="scatter"),
+    )
+
+
+def compact_table(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
+    # Show only the fields that help the user scan the workflow quickly.
+    available_columns = [column for column in columns if column in df.columns]
+    return df.loc[:, available_columns] if available_columns else df
+
+
 @st.cache_data(ttl=60)
 def load_data():
     data = fetch_json("/metrics")
@@ -106,8 +171,13 @@ with st.sidebar:
                     st.success("Signed in.")
                     st.rerun()
                 else:
-                    st.error("Invalid credentials.")
-        st.caption("Demo admin: `admin` / `admin123`")
+                    # Distinguish a real auth failure from the API being offline.
+                    if fetch_json("/health") is None:
+                        st.error("Backend not reachable. Start the API on http://localhost:8000.")
+                    else:
+                        st.error("Invalid credentials.")
+        # Keep the login hint aligned with the backend bootstrap credentials.
+        st.caption(f"Demo admin: `{DEMO_ADMIN_USER}` / `{DEMO_ADMIN_PASSWORD}`")
 
 tabs = st.tabs(
     [
@@ -201,6 +271,13 @@ with tabs[0]:
             },
         )
     )
+    score_fig.update_layout(
+        template=PLOTLY_TEMPLATE,
+        paper_bgcolor=CHART_PAPER_BG,
+        plot_bgcolor=CHART_PLOT_BG,
+        margin=dict(l=20, r=20, t=60, b=20),
+        font=dict(color="#243447"),
+    )
 
     st.plotly_chart(score_fig, use_container_width=True)
 
@@ -290,23 +367,7 @@ with tabs[0]:
             markers=True,
             template=PLOTLY_TEMPLATE,
         )
-        fig_energy.update_layout(
-            hovermode="x unified",
-            xaxis=dict(
-                rangeselector=dict(
-                    buttons=list(
-                        [
-                            dict(count=1, label="1M", step="month", stepmode="backward"),
-                            dict(count=3, label="3M", step="month", stepmode="backward"),
-                            dict(count=6, label="6M", step="month", stepmode="backward"),
-                            dict(step="all", label="All"),
-                        ]
-                    )
-                ),
-                rangeslider=dict(visible=True),
-                type="date",
-            ),
-        )
+        style_time_series_chart(fig_energy, "Energy (kWh per Wafer)")
         _add_alert_markers(fig_energy, "energy_kwh_per_wafer", "Energy")
         st.plotly_chart(fig_energy, use_container_width=True)
 
@@ -320,23 +381,7 @@ with tabs[0]:
             markers=True,
             template=PLOTLY_TEMPLATE,
         )
-        fig_water.update_layout(
-            hovermode="x unified",
-            xaxis=dict(
-                rangeselector=dict(
-                    buttons=list(
-                        [
-                            dict(count=1, label="1M", step="month", stepmode="backward"),
-                            dict(count=3, label="3M", step="month", stepmode="backward"),
-                            dict(count=6, label="6M", step="month", stepmode="backward"),
-                            dict(step="all", label="All"),
-                        ]
-                    )
-                ),
-                rangeslider=dict(visible=True),
-                type="date",
-            ),
-        )
+        style_time_series_chart(fig_water, "Water per Wafer (L)")
         _add_alert_markers(fig_water, "water_per_wafer_l", "Water")
         st.plotly_chart(fig_water, use_container_width=True)
 
@@ -351,23 +396,7 @@ with tabs[0]:
             markers=True,
             template=PLOTLY_TEMPLATE,
         )
-        fig_carbon.update_layout(
-            hovermode="x unified",
-            xaxis=dict(
-                rangeselector=dict(
-                    buttons=list(
-                        [
-                            dict(count=1, label="1M", step="month", stepmode="backward"),
-                            dict(count=3, label="3M", step="month", stepmode="backward"),
-                            dict(count=6, label="6M", step="month", stepmode="backward"),
-                            dict(step="all", label="All"),
-                        ]
-                    )
-                ),
-                rangeslider=dict(visible=True),
-                type="date",
-            ),
-        )
+        style_time_series_chart(fig_carbon, "Scope 2 Emissions (tCO2e)")
         _add_alert_markers(fig_carbon, "scope2_tco2e", "Scope 2")
         st.plotly_chart(fig_carbon, use_container_width=True)
 
@@ -381,23 +410,7 @@ with tabs[0]:
             markers=True,
             template=PLOTLY_TEMPLATE,
         )
-        fig_clean.update_layout(
-            hovermode="x unified",
-            xaxis=dict(
-                rangeselector=dict(
-                    buttons=list(
-                        [
-                            dict(count=1, label="1M", step="month", stepmode="backward"),
-                            dict(count=3, label="3M", step="month", stepmode="backward"),
-                            dict(count=6, label="6M", step="month", stepmode="backward"),
-                            dict(step="all", label="All"),
-                        ]
-                    )
-                ),
-                rangeslider=dict(visible=True),
-                type="date",
-            ),
-        )
+        style_time_series_chart(fig_clean, "Cleanroom Particle Count")
         _add_alert_markers(fig_clean, "particle_count", "Particle")
         st.plotly_chart(fig_clean, use_container_width=True)
 
@@ -433,6 +446,7 @@ with tabs[0]:
                 line={"dash": "dash"},
             )
         )
+        style_time_series_chart(forecast_fig, f"Forecast: {selected_metric}")
         st.plotly_chart(forecast_fig, use_container_width=True)
     else:
         st.info("Forecast unavailable. Start the API for forecasting.")
@@ -590,15 +604,31 @@ with tabs[3]:
     if st.session_state.get("auth_role") != "Manager/Admin":
         st.warning("Admin access required.")
     else:
-        st.caption(
-            "Assignments are primarily managed automatically by the alert workflow. "
-            "This tab is read-only."
-        )
+        st.caption("Auto-assigned support ownership for each facility.")
         assignments = fetch_json("/admin/assignments") or []
-        st.dataframe(pd.DataFrame(assignments), use_container_width=True)
-        st.info(
-            "Manual assignment creation is disabled. New alerts are assigned automatically to support staff."
-        )
+        assignment_df = pd.DataFrame(assignments)
+        if assignment_df.empty:
+            st.info("No assignments available yet.")
+        else:
+            summary_cols = st.columns(3)
+            summary_cols[0].metric("Assignments", len(assignment_df))
+            summary_cols[1].metric("Facilities Covered", assignment_df["facility_id"].nunique())
+            summary_cols[2].metric("Support Owners", assignment_df["user_id"].nunique())
+            st.dataframe(
+                compact_table(
+                    assignment_df,
+                    [
+                        "facility_id",
+                        "user_id",
+                        "metric_owner",
+                        "escalation_contact",
+                        "assignment_id",
+                    ],
+                ),
+                use_container_width=True,
+                hide_index=True,
+            )
+        st.info("Manual assignment entry is off. New alerts are routed automatically.")
 
 with tabs[4]:
     st.subheader("Alerts Resolution")
@@ -677,11 +707,28 @@ with tabs[5]:
     if st.session_state.get("auth_role") != "Manager/Admin":
         st.warning("Admin access required.")
     else:
-        st.caption(
-            "Notifications are generated automatically by alert assignment and escalation workflow."
-        )
+        st.caption("Auto-generated workflow updates for assignment and escalation.")
         notifications = fetch_json("/admin/notifications") or []
-        st.dataframe(pd.DataFrame(notifications), use_container_width=True)
-        st.info(
-            "Manual notification queueing is disabled. Notifications are generated by automated alert workflow."
-        )
+        notification_df = pd.DataFrame(notifications)
+        if notification_df.empty:
+            st.info("No notifications generated yet.")
+        else:
+            summary_cols = st.columns(3)
+            summary_cols[0].metric("Notifications", len(notification_df))
+            summary_cols[1].metric(
+                "Queued",
+                int((notification_df["status"] == "queued").sum()) if "status" in notification_df else 0,
+            )
+            summary_cols[2].metric(
+                "Recipients",
+                notification_df["recipient"].nunique() if "recipient" in notification_df else 0,
+            )
+            st.dataframe(
+                compact_table(
+                    notification_df,
+                    ["channel", "recipient", "status", "message", "notification_id"],
+                ),
+                use_container_width=True,
+                hide_index=True,
+            )
+        st.info("Manual notification queueing is off. Alerts create updates automatically.")

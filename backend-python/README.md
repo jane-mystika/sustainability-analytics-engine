@@ -1,22 +1,26 @@
 # Sustainability Analytics API
 
-FastAPI backend for metrics, scoring, forecasting, and alerts.
+FastAPI backend for metrics, scoring, forecasting, alerts, and admin workflows.
 
-## Run (local)
-1. Create a virtual environment and install dependencies:
-   - `python -m venv .venv`
-   - `.venv\\Scripts\\activate`
-   - `pip install -r requirements.txt`
-2. Copy `.env.example` to `.env` and adjust as needed.
-   - For CSV: keep `DATA_SOURCE=csv`.
-   - For MySQL: set `DATA_SOURCE=mysql` and `MYSQL_URL`.
-3. Start the API:
-   - `uvicorn app.main:app --reload --host 0.0.0.0 --port 8000`
+## Local run
+1. `python -m venv .venv`
+2. `.venv\Scripts\activate`
+3. `pip install -r requirements.txt`
+4. Copy `.env.example` to `.env`
+5. `uvicorn app.main:app --reload --host 0.0.0.0 --port 8000`
 
-## Endpoints
+## Important environment variables
+- `ENVIRONMENT`: `development` or `production`
+- `DATA_SOURCE`: `csv` or `mysql`
+- `DATA_CSV_PATH`: CSV path relative to repo root
+- `MYSQL_URL`: SQLAlchemy connection string when using MySQL
+- `CORS_ORIGINS`: comma-separated allowed frontend origins
+- `TRUSTED_HOSTS`: comma-separated allowed hostnames
+- `SEED_DEMO_DATA`: `true` for local demo mode, `false` for production
+- `ADMIN_*`: bootstrap admin account settings
+
+## Operational endpoints
+- `GET /`
 - `GET /health`
-- `GET /facilities`
-- `GET /metrics`
-- `GET /score`
-- `GET /forecast`
-- `GET /alerts`
+- `GET /ready`
+- `GET /docs`

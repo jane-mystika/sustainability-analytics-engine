@@ -1,19 +1,22 @@
-import os
 from functools import lru_cache
 from typing import Optional
 
 import pandas as pd
 from sqlalchemy import create_engine
 
+from app.config import get_settings
+
 
 def _load_csv(path: str) -> pd.DataFrame:
     df = pd.read_csv(path, parse_dates=["timestamp"])
+    # Normalize timestamps once so filters and API responses all use plain dates.
     df["timestamp"] = df["timestamp"].dt.date
     return df
 
 
 def _load_mysql(mysql_url: str) -> pd.DataFrame:
     engine = create_engine(mysql_url)
+    # Keep the selected columns aligned with the CSV schema used elsewhere in the app.
     query = """
         SELECT
             m.timestamp,
@@ -49,19 +52,23 @@ def _load_mysql(mysql_url: str) -> pd.DataFrame:
 
 @lru_cache(maxsize=1)
 def get_dataset() -> pd.DataFrame:
-    data_source = os.getenv("DATA_SOURCE", "csv").lower().strip()
-    if data_source == "mysql":
-        mysql_url = os.getenv("MYSQL_URL")
-        if not mysql_url:
+    # Reuse the loaded dataset across requests to avoid re-reading the file or DB every time.
+    settings = get_settings()
+    if settings.data_source == "mysql":
+        if not settings.mysql_url:
             raise ValueError("MYSQL_URL not set for MySQL data source.")
-        return _load_mysql(mysql_url)
+        return _load_mysql(settings.mysql_url)
 
-    csv_path = os.getenv("DATA_CSV_PATH", "../database-mysql/seed/sample_data.csv")
-    if not os.path.isfile(csv_path):
+    csv_path = settings.data_csv_path
+    if not csv_path.is_file():
         raise FileNotFoundError(
             f"CSV not found at {csv_path}. Set DATA_CSV_PATH or place the sample file."
         )
-    return _load_csv(csv_path)
+    return _load_csv(str(csv_path))
+
+
+def reset_dataset_cache() -> None:
+    get_dataset.cache_clear()
 
 
 def filter_dataset(
@@ -69,6 +76,7 @@ def filter_dataset(
     start: Optional[str] = None,
     end: Optional[str] = None,
 ) -> pd.DataFrame:
+    # Work on a filtered view first, then return a copy so callers can modify it safely.
     df = get_dataset()
 
     if facility_id:

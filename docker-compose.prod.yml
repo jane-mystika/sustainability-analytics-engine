@@ -1,0 +1,45 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend-python/Dockerfile
+    env_file:
+      - .env.production
+    restart: unless-stopped
+    expose:
+      - "8000"
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend-streamlit/Dockerfile
+    env_file:
+      - .env.production
+    environment:
+      API_URL: http://backend:8000
+      DATA_CSV_PATH: ../database-mysql/seed/sample_data.csv
+    restart: unless-stopped
+    depends_on:
+      - backend
+    expose:
+      - "8501"
+
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    depends_on:
+      - frontend
+      - backend
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

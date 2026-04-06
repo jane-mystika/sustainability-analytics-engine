@@ -1,14 +1,16 @@
-import os
 import re
 import secrets
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Header
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from app.data import filter_dataset, get_dataset
+from app.config import get_settings
+from app.data import filter_dataset, get_dataset, reset_dataset_cache
 from app.forecast import forecast_metric
 from app.scoring import compute_scores, score_tier
 from app.schemas import (
@@ -34,16 +36,9 @@ from app.schemas import (
     UserUpdate,
 )
 
-app = FastAPI(title="Sustainability Analytics API", version="0.1.0")
+settings = get_settings()
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
-# In-memory MVP stores
 USERS: Dict[str, User] = {}
 PASSWORDS: Dict[str, str] = {}
 TOKENS: Dict[str, str] = {}
@@ -54,29 +49,57 @@ ALERT_HISTORY: List[AlertHistoryEvent] = []
 NOTIFICATIONS: Dict[str, Notification] = {}
 
 
-def _seed_facilities_from_data():
-    try:
-        df = get_dataset()
-        for _, row in df[["facility_id", "facility_name"]].drop_duplicates().iterrows():
-            FACILITIES[row["facility_id"]] = FacilityCreate(
-                facility_id=row["facility_id"], facility_name=row["facility_name"], region=None
-            )
-    except Exception:
-        return
+def _reset_state() -> None:
+    USERS.clear()
+    PASSWORDS.clear()
+    TOKENS.clear()
+    FACILITIES.clear()
+    ASSIGNMENTS.clear()
+    ALERTS.clear()
+    ALERT_HISTORY.clear()
+    NOTIFICATIONS.clear()
 
 
-def _seed_demo_data():
-    USERS["admin"] = User(user_id="admin", name="Admin User", role="Manager/Admin", email="admin@demo.com")
+def _seed_facilities_from_data() -> None:
+    df = get_dataset()
+    for _, row in df[["facility_id", "facility_name"]].drop_duplicates().iterrows():
+        FACILITIES[row["facility_id"]] = FacilityCreate(
+            facility_id=row["facility_id"],
+            facility_name=row["facility_name"],
+            region=None,
+        )
+
+
+def _bootstrap_admin_user() -> None:
+    USERS[settings.admin_user_id] = User(
+        user_id=settings.admin_user_id,
+        name=settings.admin_name,
+        role="Manager/Admin",
+        email=settings.admin_email,
+    )
+    PASSWORDS[settings.admin_user_id] = settings.admin_password
+
+
+def _seed_demo_data() -> None:
+    _bootstrap_admin_user()
     USERS["employer1"] = User(
-        user_id="employer1", name="Employer One", role="Employer", email="employer@demo.com"
+        user_id="employer1",
+        name="Employer One",
+        role="Employer",
+        email="employer@demo.com",
     )
     USERS["support1"] = User(
-        user_id="support1", name="Support One", role="Support Staff", email="support@demo.com"
+        user_id="support1",
+        name="Support One",
+        role="Support Staff",
+        email="support@demo.com",
     )
     USERS["support2"] = User(
-        user_id="support2", name="Support Two", role="Support Staff", email="support2@demo.com"
+        user_id="support2",
+        name="Support Two",
+        role="Support Staff",
+        email="support2@demo.com",
     )
-    PASSWORDS["admin"] = "admin123"
     PASSWORDS["employer1"] = "employer123"
     PASSWORDS["support1"] = "support123"
     PASSWORDS["support2"] = "support123"
@@ -92,7 +115,7 @@ def _seed_demo_data():
                 user_id=support_user,
                 facility_id=facility_id,
                 metric_owner=support_user,
-                escalation_contact="admin",
+                escalation_contact=settings.admin_user_id,
             )
 
     ALERTS["alert-001"] = AlertResolution(
@@ -103,7 +126,7 @@ def _seed_demo_data():
         status="open",
         assigned_to="support1",
         assignment_id=(list(ASSIGNMENTS.keys())[0] if ASSIGNMENTS else None),
-        escalation_contact="admin",
+        escalation_contact=settings.admin_user_id,
         resolution_note=None,
         resolved_by=None,
         created_at=datetime.now(timezone.utc),
@@ -112,18 +135,43 @@ def _seed_demo_data():
     NOTIFICATIONS["notif-001"] = Notification(
         notification_id="notif-001",
         channel="email",
-        recipient="admin@demo.com",
+        recipient=settings.admin_email,
         message="Energy threshold exceeded at Phoenix Fab.",
         status="queued",
     )
 
 
-def _seed_on_startup():
+def _seed_on_startup() -> None:
+    _reset_state()
+    reset_dataset_cache()
     _seed_facilities_from_data()
-    _seed_demo_data()
+    if settings.seed_demo_data:
+        _seed_demo_data()
+    else:
+        _bootstrap_admin_user()
 
 
-_seed_on_startup()
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    _seed_on_startup()
+    yield
+
+
+app = FastAPI(
+    title=settings.app_name,
+    version=settings.app_version,
+    lifespan=lifespan,
+)
+
+if settings.trusted_hosts and settings.trusted_hosts != ["*"]:
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.trusted_hosts)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+)
 
 
 def _get_user_from_token(auth_header: Optional[str]) -> Optional[User]:
@@ -181,7 +229,7 @@ def _record_alert_event(
 
 
 def _admin_users() -> List[User]:
-    return [u for u in USERS.values() if u.role == "Manager/Admin"]
+    return [user for user in USERS.values() if user.role == "Manager/Admin"]
 
 
 def _notify_admins(message: str, channel: str = "app") -> None:
@@ -211,17 +259,17 @@ def _support_assignment_count(user_id: str) -> int:
 
 
 def _staff_for_facility(facility_id: str) -> tuple[Optional[str], Optional[str], Optional[str]]:
-    support_users = {u.user_id: u for u in USERS.values() if u.role == "Support Staff"}
+    support_users = {user.user_id: user for user in USERS.values() if user.role == "Support Staff"}
     if not support_users:
         return None, None, None
 
     candidate_assignments = [
-        a
-        for a in ASSIGNMENTS.values()
-        if a.facility_id == facility_id and a.user_id in support_users
+        assignment
+        for assignment in ASSIGNMENTS.values()
+        if assignment.facility_id == facility_id and assignment.user_id in support_users
     ]
     if candidate_assignments:
-        best = min(candidate_assignments, key=lambda a: _support_workload(a.user_id))
+        best = min(candidate_assignments, key=lambda assignment: _support_workload(assignment.user_id))
         return best.user_id, best.assignment_id, best.escalation_contact
 
     fallback_user_id = min(
@@ -235,15 +283,14 @@ def _staff_for_facility(facility_id: str) -> tuple[Optional[str], Optional[str],
             user_id=fallback_user_id,
             facility_id=facility_id,
             metric_owner=fallback_user_id,
-            escalation_contact="admin",
+            escalation_contact=settings.admin_user_id,
         )
-    return fallback_user_id, assignment_id, "admin"
+    return fallback_user_id, assignment_id, settings.admin_user_id
 
 
-def _threshold_alert_id(facility_id: str, metric: str, timestamp_value) -> str:
+def _threshold_alert_id(facility_id: str, metric: str, timestamp_value: object) -> str:
     metric_slug = re.sub(r"[^a-zA-Z0-9]+", "_", metric).strip("_").lower()
-    ts = str(timestamp_value)
-    return f"auto-{facility_id}-{metric_slug}-{ts}"
+    return f"auto-{facility_id}-{metric_slug}-{timestamp_value}"
 
 
 def _create_operational_alert(
@@ -297,17 +344,42 @@ def _create_operational_alert(
     return True
 
 
+@app.get("/")
+def root():
+    return {
+        "name": settings.app_name,
+        "version": settings.app_version,
+        "environment": settings.environment,
+        "docs": "/docs",
+    }
+
+
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "service": settings.app_name,
+        "version": settings.app_version,
+        "environment": settings.environment,
+        "timestamp": _now_utc().isoformat(),
+    }
+
+
+@app.get("/ready")
+def ready():
+    dataset = get_dataset()
+    return {
+        "status": "ready",
+        "records": int(len(dataset)),
+        "facilities": len(FACILITIES),
+        "data_source": settings.data_source,
+    }
 
 
 @app.post("/auth/login", response_model=LoginResponse)
 def login(payload: LoginRequest):
     user = USERS.get(payload.user_id)
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    if PASSWORDS.get(payload.user_id) != payload.password:
+    if not user or PASSWORDS.get(payload.user_id) != payload.password:
         raise HTTPException(status_code=401, detail="Invalid credentials")
     token = secrets.token_hex(16)
     TOKENS[token] = user.user_id
@@ -317,10 +389,10 @@ def login(payload: LoginRequest):
 @app.get("/facilities", response_model=List[Facility])
 def facilities():
     base = [
-        {"facility_id": f.facility_id, "facility_name": f.facility_name}
-        for f in FACILITIES.values()
+        {"facility_id": facility.facility_id, "facility_name": facility.facility_name}
+        for facility in FACILITIES.values()
     ]
-    return sorted(base, key=lambda x: x["facility_name"])
+    return sorted(base, key=lambda item: item["facility_name"])
 
 
 @app.get("/metrics", response_model=List[MetricRow])
@@ -354,7 +426,7 @@ def score(
         end=end,
         score=round(scores["overall"], 2),
         tier=tier,
-        components={k: round(v, 2) for k, v in scores["components"].items()},
+        components={key: round(value, 2) for key, value in scores["components"].items()},
     )
 
 
@@ -372,8 +444,8 @@ def forecast(
     return ForecastResponse(
         facility_id=facility_id,
         metric=metric,
-        history=[ForecastPoint(timestamp=t, value=float(v)) for t, v in history],
-        forecast=[ForecastPoint(timestamp=t, value=float(v)) for t, v in future],
+        history=[ForecastPoint(timestamp=timestamp, value=float(value)) for timestamp, value in history],
+        forecast=[ForecastPoint(timestamp=timestamp, value=float(value)) for timestamp, value in future],
     )
 
 
@@ -410,15 +482,15 @@ def alerts(
     if not waste_alerts.empty:
         waste_alerts["metric"] = "hazardous_waste_kg"
 
-    combined = [d for d in [energy_alerts, water_alerts, waste_alerts] if not d.empty]
+    combined = [frame for frame in [energy_alerts, water_alerts, waste_alerts] if not frame.empty]
     if not combined:
         return []
 
-    out = combined[0] if len(combined) == 1 else pd.concat(combined, ignore_index=True)
-    out = out.sort_values("timestamp", ascending=False)
+    output = combined[0] if len(combined) == 1 else pd.concat(combined, ignore_index=True)
+    output = output.sort_values("timestamp", ascending=False)
     if limit > 0:
-        out = out.head(limit)
-    rows = out.to_dict(orient="records")
+        output = output.head(limit)
+    rows = output.to_dict(orient="records")
 
     if auto_create_workflow:
         for row in rows:
@@ -439,7 +511,7 @@ def alerts(
 
     return rows
 
-# --- Admin MVP modules ---
+
 @app.get("/admin/users", response_model=List[User])
 def list_users(authorization: Optional[str] = Header(default=None)):
     _require_admin(authorization)
@@ -571,9 +643,9 @@ def resolve_alert(
     authorization: Optional[str] = Header(default=None),
 ):
     actor = _require_admin(authorization)
-    if alert_id not in ALERTS:
+    current = ALERTS.get(alert_id)
+    if not current:
         raise HTTPException(status_code=404, detail="Alert not found")
-    current = ALERTS[alert_id]
     previous_status = current.status
     updated = current.model_copy(
         update={
@@ -597,9 +669,7 @@ def resolve_alert(
             f"Alert {alert_id} resolved by {payload.resolved_by or actor.user_id}. History has been updated."
         )
     if payload.status in {"needs_info", "unresolved", "escalated"}:
-        _notify_admins(
-            f"Alert {alert_id} moved to '{payload.status}'. Admin review required."
-        )
+        _notify_admins(f"Alert {alert_id} moved to '{payload.status}'. Admin review required.")
     return updated
 
 
@@ -632,12 +702,12 @@ def staff_alerts(
     user = _require_user(authorization)
     if user.role not in {"Support Staff", "Manager/Admin"}:
         raise HTTPException(status_code=403, detail="Forbidden")
-    alerts = list(ALERTS.values())
+    alerts_list = list(ALERTS.values())
     if user.role == "Support Staff":
-        alerts = [alert for alert in alerts if alert.assigned_to == user.user_id]
+        alerts_list = [alert for alert in alerts_list if alert.assigned_to == user.user_id]
     if status:
-        alerts = [alert for alert in alerts if alert.status == status]
-    return alerts
+        alerts_list = [alert for alert in alerts_list if alert.status == status]
+    return alerts_list
 
 
 @app.patch("/staff/alerts/{alert_id}", response_model=AlertResolution)
@@ -656,7 +726,9 @@ def staff_update_alert(
         raise HTTPException(status_code=403, detail="Forbidden")
 
     previous_status = current.status
-    resolved_by = payload.resolved_by or (user.user_id if payload.status == "resolved" else current.resolved_by)
+    resolved_by = payload.resolved_by or (
+        user.user_id if payload.status == "resolved" else current.resolved_by
+    )
     updated = current.model_copy(
         update={
             "status": payload.status,
@@ -680,9 +752,7 @@ def staff_update_alert(
             f"Alert {alert_id} resolved by {user.user_id}. Resolution note: {payload.resolution_note or 'N/A'}"
         )
     if payload.status in {"needs_info", "unresolved", "escalated"}:
-        _notify_admins(
-            f"Alert {alert_id} requires admin attention (status: {payload.status})."
-        )
+        _notify_admins(f"Alert {alert_id} requires admin attention (status: {payload.status}).")
     return updated
 
 

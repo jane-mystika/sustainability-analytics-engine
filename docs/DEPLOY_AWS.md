@@ -1,32 +1,30 @@
 # AWS Deployment Notes
 
-This is a practical outline for deploying the Streamlit frontend + FastAPI backend with MySQL on AWS.
+This repo now ships with Dockerfiles and a production Compose stack, so AWS deployment is straightforward.
 
-## Recommended Architecture
-- Frontend: Streamlit on ECS Fargate or App Runner
-- Backend: FastAPI on ECS Fargate or App Runner
-- Database: Amazon RDS for MySQL
-- Networking: VPC with public subnets for app services and private subnets for RDS
-- Monitoring: CloudWatch Logs + X-Ray (optional)
+## Recommended AWS architecture
+- EC2 instance or ECS service for the compose stack
+- Route 53 for DNS
+- Optional RDS MySQL if you want to move off CSV data
 
-## High-Level Steps
-1. Containerize both services with Docker.
-2. Push images to ECR.
-3. Create an RDS MySQL instance.
-4. Deploy FastAPI service first, expose via ALB.
-5. Deploy Streamlit service, pointing `API_URL` to FastAPI ALB.
-6. Configure autoscaling and logs.
+## Simple path
+1. Launch an Ubuntu EC2 instance
+2. Install Docker and Docker Compose
+3. Clone the repo
+4. Copy `.env.production.example` to `.env.production`
+5. Set `DOMAIN`, admin credentials, and `DATA_SOURCE`
+6. Point your Route 53 record to the instance IP
+7. Run `docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build`
 
-## Environment Variables
-FastAPI:
-- `DATA_CSV_PATH` (or load from MySQL)
-
-Streamlit:
-- `API_URL`
+## ECS path
+1. Build and push the frontend and backend images to ECR
+2. Run the services on ECS Fargate
+3. Put an ALB in front
+4. Terminate TLS at the ALB
+5. Set `API_URL` for the frontend task to the backend service DNS name
+6. If using RDS, set `DATA_SOURCE=mysql` and provide `MYSQL_URL`
 
 ## Security
-- Use security groups to allow Streamlit -> FastAPI and FastAPI -> RDS only.
-- Store secrets in AWS Secrets Manager.
-
-## Next Step If You Want Full AWS IaC
-I can scaffold Terraform or AWS CDK for the full stack.
+- Restrict inbound traffic to `80/443`
+- Store secrets in Secrets Manager or SSM Parameter Store
+- Use a stronger `ADMIN_PASSWORD` and keep `SEED_DEMO_DATA=false`

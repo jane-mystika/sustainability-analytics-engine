@@ -12,7 +12,7 @@ FastAPI backend for metrics, scoring, forecasting, alerts, and admin workflows.
 ## Important environment variables
 - `ENVIRONMENT`: `development` or `production`
 - `DATA_SOURCE`: `csv` or `mysql`
-- `DATA_CSV_PATH`: CSV path relative to repo root
+- `DATA_CSV_PATH`: CSV path relative to repo root. Default: `backend-python/data/sample_data.csv`
 - `MYSQL_URL`: SQLAlchemy connection string when using MySQL
 - `CORS_ORIGINS`: comma-separated allowed frontend origins
 - `TRUSTED_HOSTS`: comma-separated allowed hostnames

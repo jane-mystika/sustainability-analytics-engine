@@ -71,7 +71,7 @@ def get_settings() -> Settings:
         # The app can load metrics from a CSV for local demos or MySQL in deployment.
         data_source=os.getenv("DATA_SOURCE", "csv").strip().lower(),
         data_csv_path=_resolve_path(
-            os.getenv("DATA_CSV_PATH", "database-mysql/seed/sample_data.csv")
+            os.getenv("DATA_CSV_PATH", "backend-python/data/sample_data.csv")
         ),
         mysql_url=os.getenv("MYSQL_URL"),
         seed_demo_data=_as_bool(

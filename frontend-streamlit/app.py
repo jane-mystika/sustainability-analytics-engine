@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 API_URL = os.getenv("API_URL", "http://localhost:8000")
-DATA_CSV_PATH = os.getenv("DATA_CSV_PATH", "../database-mysql/seed/sample_data.csv")
+DATA_CSV_PATH = os.getenv("DATA_CSV_PATH", "../backend-python/data/sample_data.csv")
 DEMO_ADMIN_USER = os.getenv("ADMIN_USER_ID", "admin")
 DEMO_ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "ChangeMe123!")
 

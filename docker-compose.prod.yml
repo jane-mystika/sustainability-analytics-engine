@@ -17,7 +17,7 @@ services:
       - .env.production
     environment:
       API_URL: http://backend:8000
-      DATA_CSV_PATH: ../database-mysql/seed/sample_data.csv
+      DATA_CSV_PATH: ../backend-python/data/sample_data.csv
     restart: unless-stopped
     depends_on:
       - backend

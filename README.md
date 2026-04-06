@@ -16,6 +16,8 @@ Production-ready starter for a sustainability analytics platform focused on semi
 - `database-mysql/` schema and sample data
 - `deploy/` reverse proxy configuration
 
+For deployment, the backend also includes its own CSV at `backend-python/data/sample_data.csv` so it can run without depending on files outside the backend service root.
+
 ## Local development
 1. Backend
    - `cd backend-python`

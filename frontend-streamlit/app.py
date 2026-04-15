@@ -10,7 +10,18 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-API_URL = os.getenv("API_URL", "http://localhost:8000")
+# The dashboard can talk to the API or fall back to a local CSV for read-only exploration.
+def _resolve_api_url() -> str:
+    env_url = os.getenv("API_URL")
+    if env_url:
+        return env_url.rstrip("/")
+    secrets_url = st.secrets.get("API_URL")
+    if secrets_url:
+        return str(secrets_url).rstrip("/")
+    return "http://localhost:8000"
+
+
+API_URL = _resolve_api_url()
 DATA_CSV_PATH = os.getenv("DATA_CSV_PATH", "../backend-python/data/sample_data.csv")
 DEMO_ADMIN_USER = os.getenv("ADMIN_USER_ID", "admin")
 DEMO_ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "ChangeMe123!")
@@ -26,9 +37,16 @@ CHART_PLOT_BG = "#FFFFFF"
 
 
 def fetch_json(path: str, params=None):
+    # All API helpers fail soft so the UI can keep rendering even if the backend is offline.
     try:
         headers = _auth_headers()
-        resp = requests.get(f"{API_URL}{path}", params=params, headers=headers, timeout=3)
+        normalized_path = path if path.startswith("/") else f"/{path}"
+        resp = requests.get(
+            f"{API_URL}{normalized_path}",
+            params=params,
+            headers=headers,
+            timeout=3,
+        )
         resp.raise_for_status()
         return resp.json()
     except Exception:
@@ -38,7 +56,13 @@ def fetch_json(path: str, params=None):
 def post_json(path: str, payload: dict):
     try:
         headers = _auth_headers()
-        resp = requests.post(f"{API_URL}{path}", json=payload, headers=headers, timeout=5)
+        normalized_path = path if path.startswith("/") else f"/{path}"
+        resp = requests.post(
+            f"{API_URL}{normalized_path}",
+            json=payload,
+            headers=headers,
+            timeout=5,
+        )
         resp.raise_for_status()
         return resp.json()
     except Exception:
@@ -48,7 +72,13 @@ def post_json(path: str, payload: dict):
 def patch_json(path: str, payload: dict):
     try:
         headers = _auth_headers()
-        resp = requests.patch(f"{API_URL}{path}", json=payload, headers=headers, timeout=5)
+        normalized_path = path if path.startswith("/") else f"/{path}"
+        resp = requests.patch(
+            f"{API_URL}{normalized_path}",
+            json=payload,
+            headers=headers,
+            timeout=5,
+        )
         resp.raise_for_status()
         return resp.json()
     except Exception:
@@ -58,7 +88,8 @@ def patch_json(path: str, payload: dict):
 def delete_json(path: str):
     try:
         headers = _auth_headers()
-        resp = requests.delete(f"{API_URL}{path}", headers=headers, timeout=5)
+        normalized_path = path if path.startswith("/") else f"/{path}"
+        resp = requests.delete(f"{API_URL}{normalized_path}", headers=headers, timeout=5)
         resp.raise_for_status()
         return resp.json()
     except Exception:
@@ -66,6 +97,7 @@ def delete_json(path: str):
 
 
 def _auth_headers():
+    # Logged-in API calls reuse the bearer token stored in Streamlit session state.
     token = st.session_state.get("auth_token")
     if token:
         return {"Authorization": f"Bearer {token}"}
@@ -132,6 +164,7 @@ def compact_table(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
 
 @st.cache_data(ttl=60)
 def load_data():
+    # Prefer live API data, but keep a local fallback so the dashboard can still open in demo mode.
     data = fetch_json("/metrics")
     if data is not None:
         df = pd.DataFrame(data)
@@ -148,6 +181,7 @@ st.caption("Multi-facility dashboard with scoring, trends, forecasting, and aler
 
 with st.sidebar:
     st.markdown("### Login")
+    st.caption(f"API: `{API_URL}`")
     if st.session_state.get("auth_token"):
         st.success(
             f"Signed in as {st.session_state.get('auth_user_id')} ({st.session_state.get('auth_role')})"
@@ -173,7 +207,11 @@ with st.sidebar:
                 else:
                     # Distinguish a real auth failure from the API being offline.
                     if fetch_json("/health") is None:
-                        st.error("Backend not reachable. Start the API on http://localhost:8000.")
+                        st.error(
+                            f"Backend not reachable at `{API_URL}`. "
+                            "If running locally, start the API on `http://localhost:8000`. "
+                            "If deployed, set `API_URL` to your backend service URL."
+                        )
                     else:
                         st.error("Invalid credentials.")
         # Keep the login hint aligned with the backend bootstrap credentials.
@@ -191,6 +229,7 @@ tabs = st.tabs(
 )
 
 with tabs[0]:
+    # Facility choices combine API-managed facilities with whatever exists in the loaded dataset.
     admin_facilities = fetch_json("/admin/facilities") or []
     admin_names = [f.get("facility_name") for f in admin_facilities if f.get("facility_name")]
     data_names = df["facility_name"].dropna().unique().tolist()
@@ -238,6 +277,7 @@ with tabs[0]:
         score_data = {"score": 0, "tier": "Bronze", "components": {}}
 
     def metric_card(label, value, suffix=""):
+        # Metric cards should stay readable even when a filtered view has missing values.
         if pd.isna(value):
             value = 0.0
         st.metric(label, f"{value:,.2f}{suffix}")
@@ -339,6 +379,7 @@ with tabs[0]:
             alert_df["facility_name"] = selected_facility
 
     def _add_alert_markers(fig, metric_key, label):
+        # Overlay alert markers directly on the trend line to connect spikes with workflow items.
         if alert_df.empty:
             return
         metric_alerts = alert_df[alert_df["metric"] == metric_key]
@@ -462,6 +503,7 @@ with tabs[1]:
     if st.session_state.get("auth_role") != "Manager/Admin":
         st.warning("Admin access required.")
     else:
+        # Admin management stays on a single page by grouping CRUD actions into forms and expanders.
         users = fetch_json("/admin/users") or []
         st.dataframe(pd.DataFrame(users), use_container_width=True)
         with st.form("create_user"):
@@ -635,6 +677,7 @@ with tabs[4]:
     if st.session_state.get("auth_role") != "Manager/Admin":
         st.warning("Admin access required.")
     else:
+        # This section exposes the operational workflow that is also triggered automatically by alerts.
         st.caption(
             "When an alert is created, the backend automatically assigns it to support staff, "
             "records history, and triggers admin notifications when escalation is needed."

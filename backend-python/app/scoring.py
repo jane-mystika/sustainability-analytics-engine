@@ -3,6 +3,7 @@ import pandas as pd
 
 
 def _normalize_inverse(value: float, low: float, high: float) -> float:
+    # Lower values are better for metrics like energy use, waste, and emissions.
     if high == low:
         return 50.0
     value = np.clip(value, low, high)
@@ -10,6 +11,7 @@ def _normalize_inverse(value: float, low: float, high: float) -> float:
 
 
 def _normalize_direct(value: float, low: float, high: float) -> float:
+    # Higher values are better for metrics like recycling and renewable share.
     if high == low:
         return 50.0
     value = np.clip(value, low, high)
@@ -20,6 +22,7 @@ def compute_scores(df: pd.DataFrame) -> dict:
     if df.empty:
         return {"overall": 0.0, "components": {}}
 
+    # Use the average row over the selected time window to create a stable composite score.
     row = df.mean(numeric_only=True)
 
     energy = np.mean(
@@ -82,6 +85,7 @@ def compute_scores(df: pd.DataFrame) -> dict:
 
 
 def score_tier(score: float) -> str:
+    # Tiers mirror the labels shown in the frontend gauge and formula explainer.
     if score >= 85:
         return "Platinum"
     if score >= 75:

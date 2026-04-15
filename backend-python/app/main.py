@@ -39,6 +39,7 @@ from app.schemas import (
 settings = get_settings()
 
 
+# In-memory stores keep the demo self-contained; production should replace these with a database.
 USERS: Dict[str, User] = {}
 PASSWORDS: Dict[str, str] = {}
 TOKENS: Dict[str, str] = {}
@@ -61,6 +62,7 @@ def _reset_state() -> None:
 
 
 def _seed_facilities_from_data() -> None:
+    # Facility metadata is derived from the metrics dataset so the admin views stay in sync.
     df = get_dataset()
     for _, row in df[["facility_id", "facility_name"]].drop_duplicates().iterrows():
         FACILITIES[row["facility_id"]] = FacilityCreate(
@@ -71,6 +73,7 @@ def _seed_facilities_from_data() -> None:
 
 
 def _bootstrap_admin_user() -> None:
+    # Always make sure there is at least one admin account available for login and review flows.
     USERS[settings.admin_user_id] = User(
         user_id=settings.admin_user_id,
         name=settings.admin_name,
@@ -81,6 +84,7 @@ def _bootstrap_admin_user() -> None:
 
 
 def _seed_demo_data() -> None:
+    # Demo mode adds a small operational workflow so the dashboard has meaningful admin data.
     _bootstrap_admin_user()
     USERS["employer1"] = User(
         user_id="employer1",
@@ -142,6 +146,7 @@ def _seed_demo_data() -> None:
 
 
 def _seed_on_startup() -> None:
+    # Reset-and-seed keeps local reloads deterministic even though state is stored in memory.
     _reset_state()
     reset_dataset_cache()
     _seed_facilities_from_data()
@@ -153,6 +158,7 @@ def _seed_on_startup() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    # FastAPI lifespan hooks are used to seed the demo state once per process start.
     _seed_on_startup()
     yield
 
@@ -175,6 +181,7 @@ app.add_middleware(
 
 
 def _get_user_from_token(auth_header: Optional[str]) -> Optional[User]:
+    # Tokens are stored server-side, so the bearer token is just a lookup key in demo mode.
     if not auth_header:
         return None
     parts = auth_header.split()
@@ -213,6 +220,7 @@ def _record_alert_event(
     actor: Optional[User],
     note: Optional[str] = None,
 ) -> None:
+    # Every workflow change is logged so the admin history tab can explain what happened.
     ALERT_HISTORY.append(
         AlertHistoryEvent(
             event_id=secrets.token_hex(8),
@@ -233,6 +241,7 @@ def _admin_users() -> List[User]:
 
 
 def _notify_admins(message: str, channel: str = "app") -> None:
+    # Notifications are fan-out writes to the in-memory queue rather than external sends.
     for admin in _admin_users():
         recipient = admin.email or admin.user_id
         notification_id = f"notif-{secrets.token_hex(6)}"
@@ -246,6 +255,7 @@ def _notify_admins(message: str, channel: str = "app") -> None:
 
 
 def _support_workload(user_id: str) -> int:
+    # Only unresolved or active alerts count toward balancing work across support staff.
     active_statuses = {"open", "in_progress", "needs_info", "unresolved", "escalated"}
     return sum(
         1
@@ -259,6 +269,7 @@ def _support_assignment_count(user_id: str) -> int:
 
 
 def _staff_for_facility(facility_id: str) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    # Prefer an existing facility assignment; otherwise fall back to the lightest support workload.
     support_users = {user.user_id: user for user in USERS.values() if user.role == "Support Staff"}
     if not support_users:
         return None, None, None
@@ -289,6 +300,7 @@ def _staff_for_facility(facility_id: str) -> tuple[Optional[str], Optional[str],
 
 
 def _threshold_alert_id(facility_id: str, metric: str, timestamp_value: object) -> str:
+    # Stable IDs prevent duplicate workflow records when the same threshold breach is re-queried.
     metric_slug = re.sub(r"[^a-zA-Z0-9]+", "_", metric).strip("_").lower()
     return f"auto-{facility_id}-{metric_slug}-{timestamp_value}"
 
@@ -305,6 +317,7 @@ def _create_operational_alert(
     resolution_note: Optional[str] = None,
     resolved_by: Optional[str] = None,
 ) -> bool:
+    # Alert creation centralizes assignment, history, and admin notification side effects.
     if alert_id in ALERTS:
         return False
 
@@ -367,6 +380,7 @@ def health():
 
 @app.get("/ready")
 def ready():
+    # Readiness checks confirm both the app and the metrics dataset are available.
     dataset = get_dataset()
     return {
         "status": "ready",
@@ -378,6 +392,7 @@ def ready():
 
 @app.post("/auth/login", response_model=LoginResponse)
 def login(payload: LoginRequest):
+    # This demo keeps password handling intentionally simple and in-memory.
     user = USERS.get(payload.user_id)
     if not user or PASSWORDS.get(payload.user_id) != payload.password:
         raise HTTPException(status_code=401, detail="Invalid credentials")
@@ -460,6 +475,7 @@ def alerts(
     limit: int = 500,
     auto_create_workflow: bool = True,
 ):
+    # Threshold breaches can optionally materialize into operational workflow records.
     df = filter_dataset(facility_id, start, end)
     if df.empty:
         return []
@@ -521,6 +537,7 @@ def list_users(authorization: Optional[str] = Header(default=None)):
 @app.post("/admin/users", response_model=User)
 def create_user(payload: UserCreate, authorization: Optional[str] = Header(default=None)):
     _require_admin(authorization)
+    # Passwords are stored separately so the public user model stays free of credential fields.
     user = User(**payload.model_dump())
     USERS[user.user_id] = user
     if payload.password:
@@ -539,6 +556,7 @@ def update_user(
     if not current:
         raise HTTPException(status_code=404, detail="User not found")
     updates = payload.model_dump(exclude_none=True)
+    # Password changes are handled outside the Pydantic user model for the same reason as create.
     password = updates.pop("password", None)
     updated = current.model_copy(update=updates)
     USERS[user_id] = updated
@@ -621,6 +639,7 @@ def list_alerts(authorization: Optional[str] = Header(default=None)):
 @app.post("/admin/alerts", response_model=AlertResolution)
 def create_alert(payload: AlertCreate, authorization: Optional[str] = Header(default=None)):
     actor = _require_admin(authorization)
+    # Manual alerts still flow through the same assignment and notification pipeline as auto alerts.
     created = _create_operational_alert(
         alert_id=payload.alert_id,
         facility_id=payload.facility_id,
@@ -700,6 +719,7 @@ def staff_alerts(
     authorization: Optional[str] = Header(default=None),
 ):
     user = _require_user(authorization)
+    # Managers can see every alert, while support staff are limited to their own queue.
     if user.role not in {"Support Staff", "Manager/Admin"}:
         raise HTTPException(status_code=403, detail="Forbidden")
     alerts_list = list(ALERTS.values())

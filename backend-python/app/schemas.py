@@ -4,6 +4,7 @@ from typing import List, Optional
 from pydantic import BaseModel
 
 
+# Shared request/response models keep FastAPI validation and OpenAPI docs aligned.
 class Facility(BaseModel):
     facility_id: str
     facility_name: str
@@ -90,6 +91,7 @@ class AlertResolutionUpdate(BaseModel):
 
 
 class AlertHistoryEvent(BaseModel):
+    # History entries capture who changed an alert and how the status moved over time.
     event_id: str
     alert_id: str
     event_type: str
@@ -128,6 +130,7 @@ class LoginResponse(BaseModel):
 
 
 class MetricRow(BaseModel):
+    # This schema reflects the normalized sustainability dataset used throughout the app.
     timestamp: date
     facility_id: str
     facility_name: str
@@ -169,6 +172,7 @@ class ForecastPoint(BaseModel):
 
 
 class ForecastResponse(BaseModel):
+    # History plus forecast points are returned together for simpler chart rendering.
     facility_id: Optional[str]
     metric: str
     history: List[ForecastPoint]

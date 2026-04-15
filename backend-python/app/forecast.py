@@ -6,6 +6,7 @@ import pandas as pd
 
 
 def _fit_linear(x: np.ndarray, y: np.ndarray) -> Tuple[float, float]:
+    # Forecasting intentionally uses a lightweight linear trend so it works without extra deps.
     if len(x) < 2:
         return 0.0, float(y[-1]) if len(y) else 0.0
     slope, intercept = np.polyfit(x, y, 1)
@@ -15,6 +16,7 @@ def _fit_linear(x: np.ndarray, y: np.ndarray) -> Tuple[float, float]:
 def forecast_metric(
     df: pd.DataFrame, metric: str, periods: int = 6
 ) -> Tuple[List[Tuple[date, float]], List[Tuple[date, float]]]:
+    # Return both history and forecast so the frontend can render them as a single chart.
     if df.empty or metric not in df.columns:
         return [], []
 
@@ -29,6 +31,7 @@ def forecast_metric(
 
     forecast = []
     for i in range(1, periods + 1):
+        # Approximate monthly spacing by stepping 30 days at a time.
         next_index = len(df) - 1 + i
         value = slope * next_index + intercept
         forecast.append((last_date + timedelta(days=30 * i), float(value)))

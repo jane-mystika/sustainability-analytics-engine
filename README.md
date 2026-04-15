@@ -44,6 +44,9 @@ For deployment, the backend also includes its own CSV at `backend-python/data/sa
 
 Caddy will provision HTTPS automatically once the domain points to the server and ports `80/443` are open.
 
+## Render deployment (two services)
+If you're deploying on Render (or any PaaS that doesn't run `docker compose`), deploy the backend and frontend as separate services and set the frontend `API_URL` to the backend URL. See `docs/DEPLOY_RENDER.md`.
+
 ## Useful endpoints
 - Website: `/`
 - API docs: `/docs`

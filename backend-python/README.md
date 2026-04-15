@@ -9,6 +9,10 @@ FastAPI backend for metrics, scoring, forecasting, alerts, and admin workflows.
 4. Copy `.env.example` to `.env`
 5. `uvicorn app.main:app --reload --host 0.0.0.0 --port 8000`
 
+## PaaS note (Render, etc.)
+If your platform provides a dynamic port, run Uvicorn with the provided `PORT`:
+- `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+
 ## Important environment variables
 - `ENVIRONMENT`: `development` or `production`
 - `DATA_SOURCE`: `csv` or `mysql`
